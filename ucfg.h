@@ -22,16 +22,16 @@
 // Revision history:
 //  16Sep15 Stephen_Higgins@KairosAutonomi.com
 //              Created from pic18 version.
+//  05Nov15 Stephen_Higgins@KairosAutonomi.com
+//              Corrected comments.
 //
-//*******************************************************************************
-// NOTE: This file MUST be (manually) kept in synch with ucfg.inc !!!
 //*******************************************************************************
 //
 //   Define all supported board configurations.
 //
 #define UCFG_PD2P_2002      0x01    // Microchip PICDEM2PLUS 2002 (has ext 4MHz)
 #define UCFG_PD2P_2010      0x02    // Microchip PICDEM2PLUS 2010 (no ext 4MHz)
-#define UCFG_KA027C         0x10    // Kairos Autonomi 107I: Quad and Video Mux
+#define UCFG_KA027C         0x10    // Kairos Autonomi 027C: Pot and Quad Encoder
 //
 //   Define all supported processors.
 //
@@ -52,7 +52,6 @@
 
     #ifdef _UCFG_PD2P02
         #define UCFG_BOARD  UCFG_PD2P_2002  // Allows logical expressions.
-//        #define UCFG_SSIO_EOMC  0x0d        // End Of Msg Char = <CR>
         #define UCFG_SSIO_EOMC  0x5d        // End Of Msg Char = "]"
         #warning Board defined: UCFG_PD2P_2002
     #endif       

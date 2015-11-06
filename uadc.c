@@ -20,14 +20,12 @@
 // Revision history:
 //  23Oct15 Stephen_Higgins@KairosAutonomi.com
 //              Convert from pic18 assembler to pic16 XC8.
+//  05Nov15 Stephen_Higgins@KairosAutonomi.com
+//              Add UCFG_KA027C defines.
 //
 //*******************************************************************************
 
 #include    "ucfg.h"    // Configure board and proc, #include <proc.h>
-
-//        #include    <sm16.inc>
-//        #include    <sbcd.inc>
-//        #include    <ulcd.inc>
 
 //  Internal prototypes.
 
@@ -45,30 +43,50 @@
     //  A/D channel = 0; no conversion active; A/D on.
 
     //  bit 7 : n/a   : 0 : (unused, don't care)
-    //  bit 6 : CHS4  : 0 : Channel Select, 0b000 -> AN0
-    //  bit 5 : CHS3  : 0 : Channel Select, 0b000 -> AN0
-    //  bit 4 : CHS2  : 0 : Channel Select, 0b000 -> AN0
-    //  bit 3 : CHS1  : 0 : Channel Select, 0b000 -> AN0
-    //  bit 2 : CHS0  : 0 : Channel Select, 0b000 -> AN0
+    //  bit 6 : CHS4  : 0 : Channel Select, 0b00000 -> AN0
+    //  bit 5 : CHS3  : 0 : Channel Select, 0b00000 -> AN0
+    //  bit 4 : CHS2  : 0 : Channel Select, 0b00000 -> AN0
+    //  bit 3 : CHS1  : 0 : Channel Select, 0b00000 -> AN0
+    //  bit 2 : CHS0  : 0 : Channel Select, 0b00000 -> AN0
     //  bit 1 : GO    : 0 : A/D Conversion Status (0 = not in progress)
     //  bit 0 : ADON  : 1 : A/D converter module is powered up
     
-    #define UADC_ADCON1_VAL  0xA0
-    
-    //  Right-justified 10-bit A/D result; Vss on Vref-; Vdd on Vref+.
-    //  A/D conversion clock is 32MHz/32 = 1.0 us.
-    //    Tad must be >= 1.0 us (Tacq must be >= 5.0 us)
-    
-    //  bit 7 : ADFM    : 1 : Right-justified 10-bit A/D result
-    //  bit 6 : ADCS2   : 0 : Clock Select, 0b010 -> Fosc/8)
-    //  bit 5 : ADCS2   : 1 : Clock Select, 0b010 -> Fosc/8)
-    //  bit 4 : ADCS2   : 0 : Clock Select, 0b010 -> Fosc/8)
-    //  bit 3 : n/a     : 0 : (unused, don't care)
-    //  bit 2 : ADNREF  : 0 : A/D Neg Ref, Vref- is connected to Vss
-    //  bit 1 : ADPREF1 : 0 : A/D Pos Ref, 0b00 -> Vref+ is connected to Vdd
-    //  bit 0 : ADPREF0 : 0 : A/D Pos Ref, 0b00 -> Vref+ is connected to Vdd
-
 #endif
+
+#if UCFG_BOARD==UCFG_KA027C
+
+    //   UCFG_KA027C
+    //   ***********
+
+    #define UADC_ADCON0_VAL     0x19
+
+    //  A/D channel = 0; no conversion active; A/D on.
+
+    //  bit 7 : n/a   : 0 : (unused, don't care)
+    //  bit 6 : CHS4  : 0 : Channel Select, 0b00110 -> AN6
+    //  bit 5 : CHS3  : 0 : Channel Select, 0b00110 -> AN6
+    //  bit 4 : CHS2  : 1 : Channel Select, 0b00110 -> AN6
+    //  bit 3 : CHS1  : 1 : Channel Select, 0b00110 -> AN6
+    //  bit 2 : CHS0  : 0 : Channel Select, 0b00110 -> AN6
+    //  bit 1 : GO    : 0 : A/D Conversion Status (0 = not in progress)
+    //  bit 0 : ADON  : 1 : A/D converter module is powered up
+    
+#endif
+
+#define UADC_ADCON1_VAL  0xA0
+
+//  Right-justified 10-bit A/D result; Vss on Vref-; Vdd on Vref+.
+//  A/D conversion clock is 32MHz/32 = 1.0 us.
+//    Tad must be >= 1.0 us (Tacq must be >= 5.0 us)
+
+//  bit 7 : ADFM    : 1 : Right-justified 10-bit A/D result
+//  bit 6 : ADCS2   : 0 : Clock Select, 0b010 -> Fosc/8)
+//  bit 5 : ADCS2   : 1 : Clock Select, 0b010 -> Fosc/8)
+//  bit 4 : ADCS2   : 0 : Clock Select, 0b010 -> Fosc/8)
+//  bit 3 : n/a     : 0 : (unused, don't care)
+//  bit 2 : ADNREF  : 0 : A/D Neg Ref, Vref- is connected to Vss
+//  bit 1 : ADPREF1 : 0 : A/D Pos Ref, 0b00 -> Vref+ is connected to Vdd
+//  bit 0 : ADPREF0 : 0 : A/D Pos Ref, 0b00 -> Vref+ is connected to Vdd
 
 //*******************************************************************************
 //

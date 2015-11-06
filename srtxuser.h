@@ -20,31 +20,35 @@
 // Revision history:
 //  04Sep15 Stephen_Higgins@KairosAutonomi.com
 //              Change from pic18f to pic16f1847.
+//  04Sep15 Stephen_Higgins@KairosAutonomi.com
+//              Change from pic18f to pic16f1847.
 //
 //*******************************************************************************
 #include    "ucfg.h"
 
 // Counts to load task timer at initialization (must be non-zero.)
 // Each task will be first scheduled at the SRTX-timer event which
-//   occurs as equated below.  However, please note that immediately
-//   after initialization is complete, a single "faux" SRTX-timer
-//   event occurs, which allows all tasks equated to "1" below to run.
-// Allowed range is (1 - 255).
+//  occurs as equated below.  However, please note that immediately
+//  after initialization is complete, a single "faux" SRTX-timer
+//  event occurs, which allows all tasks equated to "1" below to run.
+//  Allowed range is (1 - 255).
 
-#define	SRTX_CNT_INIT_TASK1 1
+#define SRTX_CNT_INIT_TASK1 1
 #define SRTX_CNT_INIT_TASK2 1
 #define SRTX_CNT_INIT_TASK3 1
 
-// Counts to reload task timer each expiration.  This is the number of
-//   SRTX timer events which must occur before the task is again scheduled.
-// SRTX timer events occur every 100.0 ms or 10.0 ms, depending on board.
-// Allowed range is (0-255).
+// Counts to reload task timers each expiration.  This is the number of
+//  SRTX timer events which must occur before the task is again scheduled.
+//  SRTX timer events occur every 10 or 20 or 100 ms, depending on board.
+//  Search on definition of UAPP_TMR1L_VAL and UAPP_TMR1H_VAL (usually in 
+//  uapp_XXX.c) for the timer base interval.
+//  Allowed range is (0-255).
 
-#if (UCFG_BOARD == UCFG_PD2P_2002) || (UCFG_BOARD == UCFG_PD2P_2010)
-    #define	SRTX_CNT_RELOAD_TASK1	0x01    //   1 =    10 ms
+#if (UCFG_BOARD == UCFG_PD2P_2002) || (UCFG_BOARD == UCFG_PD2P_2010) || (UCFG_BOARD == UCFG_KA027C)
+    #define	SRTX_CNT_RELOAD_TASK1	0x01    //   1 =    10 ms  (for example)
     #warning SRTX CNT RELOAD TASK1: 1
-    #define	SRTX_CNT_RELOAD_TASK2	0x0A    //  10 =   100 ms
-    #define	SRTX_CNT_RELOAD_TASK3	0x64    // 100 = 1.000 sec
+    #define	SRTX_CNT_RELOAD_TASK2	0x0A    //  10 =   100 ms  (for example)
+    #define	SRTX_CNT_RELOAD_TASK3	0x64    // 100 = 1.000 sec (for example)
 #else
     #warning *** Unrecognized UCFG_BOARD ***
 #endif
