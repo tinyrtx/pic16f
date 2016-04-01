@@ -20,6 +20,8 @@
 // Revision history:
 //  02Oct15 Stephen_Higgins@KairosAutonomi.com
 //              Converted from PIC18F2620 to PIC16F1847.
+//  01Apr16 Stephen_Higgins@KairosAutonomi.com
+//              Init c='X' in UAPP_Task3() to fix bug.
 //
 //*******************************************************************************
 //
@@ -78,7 +80,7 @@ void UAPP_Timer0_Init( unsigned char );
 
 //  String literals.
 
-const char UAPP_MsgInit[] = "[V: Nemesis Replacement 16F1847 v0.2.0 027C 20151029]\n\r";
+const char UAPP_MsgInit[] = "[V: Nemesis Replacement 16F1847 v0.2.1 027C 20160401]\n\r";
 const char UAPP_MsgNotImplemented[] = "[?: Not implemented]\n\r";
 const char UAPP_MsgNotRecognized[] = "[?: Not recognized]\n\r";
 const char UAPP_MsgEchoActive[] = "[E: Message echo activated]\n\r";
@@ -499,7 +501,7 @@ char c;
 
     //  Copy TaskADC (20ms) message to output buffer if reporting active.
     if( UAPP_Flags.UAPP_ReportActive )
-        for( i = 0; (i < UAPP_BUFFERLENGTH) && (c != '\0'); i++ )
+        for( i = 0, c = 'X'; (i < UAPP_BUFFERLENGTH) && (c != '\0'); i++ )
             {
             c = UAPP_ADC_PWM_Msg[ i ];
             SSIO_PutByteTxBuffer( c );
