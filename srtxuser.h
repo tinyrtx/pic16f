@@ -22,6 +22,8 @@
 //              Change from pic18f to pic16f1847.
 //  04Sep15 Stephen_Higgins@KairosAutonomi.com
 //              Change from pic18f to pic16f1847.
+//  08Apr16 Stephen_Higgins@KairosAutonomi.com
+//              Change timing base to 5ms for UCFG_KA027C.
 //
 //*******************************************************************************
 #include    "ucfg.h"
@@ -45,10 +47,10 @@
 //  Allowed range is (0-255).
 
 #if (UCFG_BOARD == UCFG_PD2P_2002) || (UCFG_BOARD == UCFG_PD2P_2010) || (UCFG_BOARD == UCFG_KA027C)
-    #define	SRTX_CNT_RELOAD_TASK1	0x01    //   1 =    10 ms  (for example)
+    #define	SRTX_CNT_RELOAD_TASK1	0x01    //   1 =     5 ms
     #warning SRTX CNT RELOAD TASK1: 1
-    #define	SRTX_CNT_RELOAD_TASK2	0x0A    //  10 =   100 ms  (for example)
-    #define	SRTX_CNT_RELOAD_TASK3	0x64    // 100 = 1.000 sec (for example)
+    #define	SRTX_CNT_RELOAD_TASK2	0x04    //   4 =    20 ms
+    #define	SRTX_CNT_RELOAD_TASK3	0xC8    // 200 = 1.000 sec
 #else
     #warning *** Unrecognized UCFG_BOARD ***
 #endif
