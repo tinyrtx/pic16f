@@ -1,7 +1,7 @@
 //*******************************************************************************
 // tinyRTX Filename: uapp_ka027c.c (User APPlication for KA 027C board)
 //
-// Copyright 2015 Sycamore Software, Inc.  ** www.tinyRTX.com **
+// Copyright 2016 Sycamore Software, Inc.  ** www.tinyRTX.com **
 // Distributed under the terms of the GNU Lesser General Purpose License v3
 //
 // This file is part of tinyRTX. tinyRTX is free software: you can redistribute
@@ -22,6 +22,56 @@
 //              Created from uapp_pd2p.c, converted to Kairos 027C.
 //  01Apr16 Stephen_Higgins@KairosAutonomi.com
 //              Init c='X' in UAPP_Task3() to fix bug.
+//  12Apr16 Stephen_Higgins@KairosAutonomi.com
+//              Change Task1 from 20ms to 5ms, use Task2 at 20 ms.
+//              If UAPP_Flags.UAPP_100PctActive NOT TRUE then function as before,
+//              but calling UADC_Trigger() from Task2 (now 20ms) instead of Task1.
+//              Also set Timer0 for 8us/count as before.
+//              If it is TRUE, then call UADC_Trigger() from Task1 (now 5ms).
+//              Also set Timer0 for 32us/count, so can get max PWM width
+//              of 8ms.  This lets us create a 5ms PWM at 5ms period for 100% on.
+//              Add new messages and use Task3 to call UAPP_CheckDiscrete_100PctActive().
+//
+//*******************************************************************************
+//
+// Complete PIC16F1847 (18-pin device) pin assignments for PICDEM 2 Plus (2002) Demo Board
+//   OR PICDEM 2 Plus (2010) Demo Board:
+//
+//  1) RA2/AN2           = Discrete In: unused
+//  2) RA3/AN3           = Discrete In: unused
+//  3) RA4               = Discrete In:  Pushbutton S2 (active low, no debounce H/W)
+//  4) RA5/MCLR*/Vpp     = Reset/Programming connector(1): (active low, with debounce H/W)
+//  5) Vss               = Programming connector(3) (Ground)
+//  6) RB0               = Discrete Out: LED RB0 (when J6 in place)
+//                       = (Discrete In: RB0/INT also Pushbutton S3 (active low, with debounce H/W))
+//  7) RB1/(RX)/SDA1     = Discrete Out: LED RB1 (when J6 in place)
+//  8) RB2/(TX)/RX/SDA2  = Discrete In, USART RX (RS-232), USART control requires pin as Discrete In.
+//  9) RB3               = Discrete Out: LED RB3 (when J6 in place)
+// 10) RB4/SCL1          = No Connect: (configured as Discrete In)
+// 11) RB5/TX/SCL2       = Discrete In, USART TX (RS-232), USART control requires pin as Discrete In.
+// 12) RB6/PGC           = Programming connector(5) (PGC) ICD2 control requires pin as Discrete In.
+// 13) RB7/PGD           = Programming connector(4) (PGD) ICD2 control requires pin as Discrete In.
+// 14) Vdd               = Programming connector(2) (+5 VDC)
+// 15) RA6/OSC2          = Discrete Out: unused
+    //
+    //   External 4 MHz crystal installed in Y2, PICDEM 2 Plus (2002) (IGNORED).
+    //
+    // 16) RA7/OSC1/CLKIN    = Discrete In: unused, ignore external crystal (or remove it)
+    //
+    //   External 4 MHz crystal NOT installed in Y2, PICDEM 2 Plus (2010) PN 02-01630-1.
+    //   Note that Jumper J7 should not be connected.
+    //
+    // 16) RA7/OSC1/CLKIN    = Discrete In: unused
+    //
+// 17) RA0/AN0           = Analog In: Potentiometer Voltage
+// 18) RA1/AN1           = Discrete Out: Servo PWM, 20 ms period, 900-2040 us pulse width.
+//
+//  NOTE: Both versions of the PICDEM 2 Plus Demo Board have RX/TX routed to 
+//      RC7/RC6.  Therefore 18-pin parts do not have access to these signals.
+//      With the usage of APFCON0/1 the chip RX/TX are routed to RB2/RB5 (same
+//      pins as RX/TX on the Nemesis 16F88).  So for the chip to use the RS-232
+//      port it is necessary to jumper chip RX RB2 to board RX RC7, and also
+//      jumper chip TX RB5 to board TX RC6.
 //
 //*******************************************************************************
 //
@@ -50,7 +100,7 @@
 // 14) Vdd               = +5 VDC
 // 15) RA6/OSC2          = Discrete Out: unused
 // 16) RA7/OSC1/CLKIN    = Discrete In: unused
-// 17) RA0/AN0           = Discrete In: unused
+// 17) RA0/AN0           = Discrete In: 100% PWM is inactive if pulled high, active if GND.
 // 18) RA1/AN1           = Discrete Out: Servo PWM, 20 ms period, 900-2040 us pulse width.
 //
 //*******************************************************************************
@@ -66,15 +116,18 @@
 
 void UAPP_ClearRcBuffer( void );
 void UAPP_Timer0_Init( unsigned char );
+void UAPP_CheckDiscrete_100PctActive( void );
 
 //  String literals.
 
-const char UAPP_MsgInit[] = "[V: KA-027C 16F1847 v2.0.1 20160401]\n\r";
-const char UAPP_MsgHelp[] = "[H: H-elp V-ersion E-cho R-eport]\n\r";
+const char UAPP_MsgInit[] = "[V: KA-027C 16F1847 v2.1.0 20160412]\n\r";
+const char UAPP_MsgHelp[] = "[H: H-elp V-ersion E-cho R-eport P-ercent PWM]\n\r";
 const char UAPP_MsgEchoActive[] = "[E: Message echo activated]\n\r";
 const char UAPP_MsgEchoInactive[] = "[E: Message echo deactivated]\n\r";
-const char UAPP_ReportActive[] = "[R: Reporting activated]\n\r";
-const char UAPP_ReportInactive[] = "[R: Reporting deactivated]\n\r";
+const char UAPP_MsgReportActive[] = "[R: Reporting activated]\n\r";
+const char UAPP_MsgReportInactive[] = "[R: Reporting deactivated]\n\r";
+const char UAPP_Msg100PctActive[] = "[P: 100 percent PWM activated]\n\r";
+const char UAPP_Msg100PctInactive[] = "[P: 100 percent PWM deactivated]\n\r";
 const char UAPP_MsgNotImplemented[] = "[?: Not implemented]\n\r";
 const char UAPP_MsgNotRecognized[] = "[?: Not recognized]\n\r";
 const char UAPP_Nibble_ASCII[] = "0123456789ABCDEF";
@@ -89,9 +142,11 @@ unsigned char UAPP_ADC_PWM_Msg[UAPP_BUFFERLENGTH];
 
 struct
 {
-    unsigned char UAPP_MsgEchoActive: 1;    //  Echo incoming Rc msg to Tx.
+    unsigned char UAPP_EchoActive:    1;    //  Echo incoming Rc msg to Tx.
     unsigned char UAPP_ReportActive:  1;    //  Report data in Task 3.
-    unsigned char unused            : 6;
+    unsigned char UAPP_100PctActive:  1;    //  0 -> 20ms PWM period, 900us-2040us width, Timer0  8us.
+                                            //  1 ->  5ms PWM period,        0-5ms width, Timer0 32us.
+    unsigned char unused            : 5;
 } UAPP_Flags;
 
 //*******************************************************************************
@@ -332,13 +387,21 @@ struct
 
 //*******************************************************************************
 
-#define UAPP_TMR1L_VAL  0xE0
-#define UAPP_TMR1H_VAL  0xB1
+//#define UAPP_TMR1L_VAL_20MS  0xE0
+//#define UAPP_TMR1H_VAL_20MS  0xB1
+//
+//// 32 MHz Fosc/4 is base clock = 8 MHz = 0.125 us per clock.
+//// 1:8 prescale = 0.125 * 8 = 1.0 us per clock.
+//// 20,000 counts * 1.0us/clock = 20,000 us/rollover = 20ms/rollover.
+//// Timer preload value = 65,536 - 20,000 = 45,536 = 0xB1E0.
+
+#define UAPP_TMR1L_VAL_5MS  0x78
+#define UAPP_TMR1H_VAL_5MS  0xEC
 
 // 32 MHz Fosc/4 is base clock = 8 MHz = 0.125 us per clock.
 // 1:8 prescale = 0.125 * 8 = 1.0 us per clock.
-// 20,000 counts * 1.0us/clock = 20,000 us/rollover = 20ms/rollover.
-// Timer preload value = 65,536 - 20,000 = 45,536 = 0xB1E0.
+// 5,000 counts * 1.0us/clock = 5,000 us/rollover = 5ms/rollover.
+// Timer preload value = 65,536 - 5,000 = 61,536 = 0xEC78.
 
 #define UAPP_APFCON0_VAL  0x80
 
@@ -401,7 +464,7 @@ struct
 // bit 1 : INTF      : 0 : The INT external interrupt did not occur
 // bit 0 : IOCF      : 0 : None of the Interrupt-On-Change pins have changed state
 
-#define UAPP_OPTION_REG_VAL  0xD5
+#define UAPP_OPTION_REG_VAL_8us  0xD5
 
 // TMR0 clock source is instruction clock Fosc/4;
 // pre-scaler is used; 1:64 pre-scaler.
@@ -418,6 +481,24 @@ struct
 // 32 MHz Fosc/4 is base clock = 8 MHz = 0.125 us per clock.
 // 1:64 prescale = 0.125 * 64 = 8.0 us per clock.
 // 255 counts * 8.0us/clock = 2.040 ms max pulse width.
+
+#define UAPP_OPTION_REG_VAL_32us  0xD7
+
+// TMR0 clock source is instruction clock Fosc/4;
+// pre-scaler is used; 1:256 pre-scaler.
+
+// bit 5 : WPUEN   : 1 : All weak pull-ups are disabled (except MCLR, if it is enabled)
+// bit 4 : INTEDG  : 1 : Interrupt on rising edge of RB0/INT pin
+// bit 5 : TMR0CS  : 0 : Internal instruction cycle clock (Fosc/4)
+// bit 4 : TMR0SE  : 1 : Increment on high-to-low transition on RA4/T0CKI pin
+// bit 3 : PSA     : 0 : Prescaler is used by the Timer0 module
+// bit 2 : PS2     : 1 : Timer0 Prescale Select, 0b111 -> 1:256 Prescale value
+// bit 1 : PS1     : 1 : Timer0 Prescale Select, 0b111 -> 1:256 Prescale value
+// bit 0 : PS0     : 1 : Timer0 Prescale Select, 0b111 -> 1:256 Prescale value
+
+// 32 MHz Fosc/4 is base clock = 8 MHz = 0.125 us per clock.
+// 1:256 prescale = 0.125 * 256 = 32.0 us per clock.
+// 255 counts * 32.0us/clock = 8.160 ms max pulse width.
 
 //*******************************************************************************
 //
@@ -465,8 +546,11 @@ void UAPP_POR_Init_PhaseB( void )
     UAPP_ClearRcBuffer();               // Clear Rx buffer before messages can arrive.
     USIO_Init();                        // User Serial I/O hardware init.
 
-    UAPP_Flags.UAPP_MsgEchoActive = 0;  // Do not echo received msgs.
+    UAPP_Flags.UAPP_EchoActive = 0;     // Do not echo received msgs.
     UAPP_Flags.UAPP_ReportActive = 1;   // Do report data.
+
+    UAPP_Flags.UAPP_100PctActive = 0;   // Default to 20ms period, 900-2040us width.
+    UAPP_CheckDiscrete_100PctActive();  // Check for override to 5ms period, 0-5ms width.
 
     //  Now before we can place chars in the TX buffer, which will cause the USART
     //      HW to start transmitting, we need to ensure that the 4X PLL is running,
@@ -485,28 +569,35 @@ void UAPP_POR_Init_PhaseB( void )
 
 //*******************************************************************************
 //
-// UAPP_Timer0_Init: Init Timer0 module to generate PWM for Timer0_Duration_8us.
+// UAPP_Timer0_Init: Init Timer0 module to generate PWM for Timer0_Duration.
 //
-//  Timer0_Duration_8us: the number of 8us counts for PWM active high.
+//  Timer0_Duration: the number of 8us (or 32us) counts for PWM active high.
 //
-//  When Timer0 expires, SISD is going to get an int, then PWM is finished.
+//  When Timer0 expires, SISD is going to get an int,
+//  then PWM will be finished in UAPP_Timer0_Expired().
 
 #pragma interrupt_level 1
-void UAPP_Timer0_Init( unsigned char Timer0_Duration_8us )
+void UAPP_Timer0_Init( unsigned char Timer0_Duration )
 {
-unsigned char Timer0_PreLoad_8us;
+unsigned char Timer0_PreLoad;
 
-    OPTION_REG = UAPP_OPTION_REG_VAL;   // Initialize Timer0 (always running).
+    if( UAPP_Flags.UAPP_100PctActive )
+        OPTION_REG = UAPP_OPTION_REG_VAL_32us;  // Initialize Timer0 to 32us/count.
+    else
+        OPTION_REG = UAPP_OPTION_REG_VAL_8us;   // Initialize Timer0 to  8us/count.
 
-    //  Form pre-load value from requested duration.
-    Timer0_PreLoad_8us = (unsigned char) 0xFF - Timer0_Duration_8us;
+    if( Timer0_Duration > 0 )           // Only create pulse for non-zero duration.
+        {
+        //  Form pre-load value from requested duration.
+        Timer0_PreLoad = (unsigned char) 0xFF - Timer0_Duration;
 
-    TMR0 = Timer0_PreLoad_8us;      // Load Timer0 to get desired duration.
+        TMR0 = Timer0_PreLoad;          // Load Timer0 to get desired duration.
 
-    LATAbits.LATA1 = 1;             // PWM signal high begins the pulse.
+        LATAbits.LATA1 = 1;             // PWM signal high begins the pulse.
 
-    INTCONbits.TMR0IF = 0;          // Clear Timer0 interrupt flag.
-    INTCONbits.TMR0IE = 1;          // Enable Timer0 interrupts.
+        INTCONbits.TMR0IF = 0;          // Clear Timer0 interrupt flag.
+        INTCONbits.TMR0IE = 1;          // Enable Timer0 interrupts.
+        }
 }
 
 //*******************************************************************************
@@ -526,10 +617,9 @@ void UAPP_Timer0_Expired( void )
 #pragma interrupt_level 1
 void UAPP_Timer1_Init( void )
 {
-    T1CON = UAPP_T1CON_VAL;   // Initialize Timer1 but don't start it.
-
-    TMR1L = UAPP_TMR1L_VAL;   // Timer1 pre-load value, low byte.
-    TMR1H = UAPP_TMR1H_VAL;   // Timer1 pre-load value, high byte.
+    T1CON = UAPP_T1CON_VAL;         // Initialize Timer1 but don't start it.
+    TMR1L = UAPP_TMR1L_VAL_5MS;     // Timer1 pre-load value,  5ms, low byte.
+    TMR1H = UAPP_TMR1H_VAL_5MS;     // Timer1 pre-load value,  5ms, high byte.
 
     PIE1bits.TMR1IE = 1;      // Enable Timer1 interrupts.
     T1CONbits.TMR1ON = 1;     // Turn on Timer1 module.
@@ -547,8 +637,10 @@ void UAPP_Task1( void )
         LATAbits.LATA3 ^= 1;            //  Toggle LED 2.
     #endif
 
-    UADC_Trigger();                         //  Trigger an A/C conversion.
-                                            //  UADC_Trigger enabled ADC interrupts.
+    // If 100% mode active then start ADC and PWM pulse every 5ms. */
+    if( UAPP_Flags.UAPP_100PctActive )
+        UADC_Trigger();                 //  Trigger an A/D conversion.
+                                        //  UADC_Trigger enabled ADC interrupts.
 }
 
 //*******************************************************************************
@@ -560,6 +652,11 @@ void UAPP_Task2( void )
     #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
         LATBbits.LATB1 = LATBbits.LATB1^1;  // Toggle LED 2.
     #endif
+
+    // If 100% mode NOT active then start ADC and PWM pulse every 20ms. */
+    if( !UAPP_Flags.UAPP_100PctActive )
+        UADC_Trigger();                 //  Trigger an A/D conversion.
+                                        //  UADC_Trigger enabled ADC interrupts.
 }
 
 //*******************************************************************************
@@ -571,11 +668,14 @@ void UAPP_Task3( void )
 unsigned char i;
 char c;
 
+    // Check for override to 5ms period, 0-5ms width.
+    UAPP_CheckDiscrete_100PctActive();
+
     #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
         LATBbits.LATB3 = LATBbits.LATB3^1;  //  Toggle LED 4.
     #endif
 
-    //  Copy TaskADC (20ms) message to output buffer if reporting active.
+    //  Copy TaskADC (5 or 20ms) message to output buffer if reporting active.
     if( UAPP_Flags.UAPP_ReportActive )
         for( i = 0, c = 'X'; (i < UAPP_BUFFERLENGTH) && (c != '\0'); i++ )
             {
@@ -587,7 +687,7 @@ char c;
 //*******************************************************************************
 //
 // UAPP_TaskADC: Convert A/D result, output it, then convert to 0 to 5v and
-//      output that.
+//      output that.  Then start PWM pulse high by calling UAPP_Timer0_Init().
 
 void UAPP_TaskADC( void )
 {
@@ -639,57 +739,76 @@ unsigned char i;
     UAPP_ADC_PWM_Msg[++i] = UAPP_Nibble_ASCII[ UAPP_ResultBCD.nibble0 ];
     UAPP_ADC_PWM_Msg[++i] = 'V';
 
-    //  UAPP_RawADC.word contains right-justified 10-bit result, upper 6 bits are 0.
+    if( !UAPP_Flags.UAPP_100PctActive)
+        {
+        //  0 -> 20ms PWM period, 900us-2040us width.
 
-    //  Eadc = 0.00 Vdc ===> Nadc = 0x0000 ===> Npwm = (  0+90*10/8) 108 ===>  900 us PWM
-    //  Eadc = 5.00 Vdc ===> Nadc = 0x03ff ===> Npwm = (127+90*10/8) 255 ===> 2170 us PWM
+        //  UAPP_RawADC.word contains right-justified 10-bit result, upper 6 bits are 0.
+        //  0x0000 = 0.00 Vdc, 0x03ff = 5.00 Vdc.
 
-    //  Convert raw A/D to engineering units, assuming 1023 counts = 0x3ff = 5 volts.
-    //  Nadc(computer counts) = Eadc(volts) * (1023 counts/5.0 volts) so Nadc = Eadc * 204.6
-    //  (With Nadc = Eadc * 204.6, Eadc = Nadc/204.6, or
-    //   Eadc(volts) = Nadc * 0.00489 (each Nadc is 4.89mV) )
+        //  The count passed to UAPP_Timer0_Init is in 8us increments.
+        //  Convert raw A/D to PWM 8us counts, using desired mapping for servos...
+        //  ... Npwm = ((Nadc / 8) + 90) * 10/8.
+        //  Here's the mapping for several voltages, and the resulting 8us counts.
+        //  Npwm(Nadc=0)    = (  0 + 90) * 10us/8us = 108 8us counts =  0x6c =  900us PWM (lower limit)
+        //  Npwm(Nadc=912)  = (114 + 90) * 10us/8us = 255 8us counts =  0xff = 2040us PWM (upper limit)
+        //  Npwm(Nadc=1023) = (127 + 90) * 10us/8us = 271 8us counts = 0x10f = 2170us PWM (limit at 0xff)
+        //  271 won't fit in 8 bits, so max Npwm at 255, then 255 Npwm/8us ===> 2040us PWM max width.
 
-    //  Npwm = (Nadc / 8) + 90; (Nadc = 1023 counts / 5.0 V; Npwm = 127 counts / 5.0 V)
+        //  For PWM purposes, since each Nadc ranges 0-1023 and Npwm ranges 0-127, Npwm = Nadc / 8.
+        //  Here's the fixed point math we'll use to convert from Nadc to Npwm.
+        //  Npwm = ((Nadc / 8) + 90) * 10 / 8
+        //  Npwm =  (Nadc / 8) * 10 / 8 + (90 * 10 / 8)
+        //  Npwm =  (Nadc * 10 / 64)    + (90 * 10 * 8 / 64)
+        //  Npwm = ((Nadc * 10 )        + (90 * 10 * 8)) / 64
+        //  Npwm = ((Nadc * 10 )        + 7200)          / 64
 
-    //  Npwm(Nadc=0)    = (  0 + 90) * 10us/8us = 108 =  0x6c =  900 us PWM (lower limit)
-    //  Npwm(Nadc=912)  = (114 + 90) * 10us/8us = 255 =  0xff = 2040 us PWM (upper limit)
-    //  Npwm(Nadc=1023) = (127 + 90) * 10us/8us = 271 = 0x10f = 2170 us PWM (limit at 0xff)
+        //  Therefore we multiply Nadc by 10, add 7200, and shift right by 6 bits to / 64.
+        //  After this we must ensure that there is no overflow past 255.
 
-    //  Eadc/8 = 0x00, Eadc/8 + 90 =   0 + 90 =  90 N/10us ===>  900 us PWM
-    //  Eadc/8 = 0x7f, Eadc/8 + 90 = 127 + 90 = 217 N/10us ===> 2170 us PWM
+        UAPP_RawADC.word *= 10;         //  Multiply Nadc by 10.
+        UAPP_RawADC.word += 7200;       //  Add 7200 offset to get proper range.
+        UAPP_RawADC.word >>= 6;         //  Shift Npwm 6 bits right to /64.
 
-    //  The count passed to UAPP_Timer0_Init is in 8us increments.
+        if( UAPP_RawADC.word > 255 )    //  If overflows 8-bit byte..
+            UAPP_RawADC.word = 255;     //  ..then max it at 255.
 
-    //  (Eadc/8 + 90)*10us/8us = (  0 + 90)*1.25 = 112 N/8us ===>  900 us PWM
-    //  (Eadc/8 + 90)*10us/8us = (127 + 90)*1.25 = 271 N/8us ===> 2170 us PWM
+        //  Multiply number of 8us counts by 8 to get units us, 16-bit result, for serial message.
+        //  Compiler should recognise this as left shift by 3 bits.
+        UAPP_Intermediate.word0 = (unsigned char) UAPP_RawADC.byte0 * (unsigned char) 8;
 
-    //  260 won't fit in 8 bits, so max N at 255, then 255 N/8us ===> 2040 us PWM
+        }   // ( !UAPP_Flags.UAPP_100PctActive)
+    else
+        {
+        //  1 -> 5ms PWM period, 0-5ms width.
 
-    //  For PWM purposes, we desire Epwm = N * 8 (each N is 8 us), or Npwm = Epwm / 8.
+        //  UAPP_RawADC.word contains right-justified 10-bit result, upper 6 bits are 0.
+        //  0x0000 = 0.00 Vdc, 0x03ff = 5.00 Vdc.
 
-    //  Npwm = ((Nadc / 8) + 90) * 10 / 8
-    //  Npwm =  (Nadc / 8) * 10 / 8 + (90 * 10 / 8)
-    //  Npwm =  (Nadc * 10 / 64)    + (90 * 10 * 8 / 64)
-    //  Npwm = ((Nadc * 10 )        + (90 * 10 * 8)) / 64
-    //  Npwm = ((Nadc * 10 )        + 7200)          / 64
+        //  The count passed to UAPP_Timer0_Init is in 32us increments.
+        //  Convert raw A/D to PWM 32us counts, using desired mapping for 0-100%, Npwm = (Nadc * 40 / 256).
+        //  Here's the mapping for several voltages, and the resulting 32us counts.
+        //  Npwm(Nadc=0)    = (    0 * 40 / 256 =    0 32us counts =  0x00 =    0us PWM (lower limit)
+        //  Npwm(Nadc=1023) = ( 1023 * 40 / 256 =  159 32us counts =  0x9f = 5088us PWM (upper limit)
 
-    //  Therefore we multiply Nadc by 10, add 7200, and shift right by 6 bit to / 64.
-    //  After this we must ensure that there is no overflow past 255.
+        //  Here's the fixed point math we'll use to convert from Nadc to Npwm.
+        //  Npwm = (Nadc * 40) / 256
 
-    UAPP_RawADC.word *= 10;         //  Multiply Nadc by 10.
-    UAPP_RawADC.word += 7200;       //  Add 7200 offset to get proper range.
-    UAPP_RawADC.word >>= 6;         //  Shift Npwm 6 bits right to /6.
+        //  Therefore we multiply Nadc by 40, and shift right by 8 bits to / 256.
 
-    if( UAPP_RawADC.word > 255 )    //  If overflows 8-bit byte..
-        UAPP_RawADC.word = 255;     //  ..then max it at 255.
+        UAPP_RawADC.word *= 40;         //  Multiply Nadc by 40.
+        UAPP_RawADC.word >>= 8;         //  Shift Npwm 6 bits right to / 256.
 
-    //  Multiply number of 8us counts by 8 to get units us, 16-bit result.
-    UAPP_Intermediate.word0 = (unsigned char) UAPP_RawADC.byte0 * (unsigned char) 8;
+        //  Multiply number of 32us counts by 32 to get units us, 16-bit result, for serial message.
+        //  Compiler should recognise this as left shift by 5 bits.
+        UAPP_Intermediate.word0 = (unsigned char) UAPP_RawADC.byte0 * (unsigned char) 32;
+
+        }   // ( UAPP_Flags.UAPP_100PctActive)
 
     //  Convert from 16-bit count of us to 6 nibble BCD.
     UAPP_ResultBCD.shortLong = SUTL_EngToBCD_16u( UAPP_Intermediate.word0 );
 
-    //  Format 4 non-zero nibbles as ASCII and copy to buffer.
+    //  Format 4 lower non-zero nibbles as ASCII and copy to buffer.
     UAPP_ADC_PWM_Msg[++i] = ' ';
     UAPP_ADC_PWM_Msg[++i] = UAPP_Nibble_ASCII[ UAPP_ResultBCD.nibble3 ];
     UAPP_ADC_PWM_Msg[++i] = UAPP_Nibble_ASCII[ UAPP_ResultBCD.nibble2 ];
@@ -702,7 +821,7 @@ unsigned char i;
     UAPP_ADC_PWM_Msg[++i] = '\r';
     UAPP_ADC_PWM_Msg[++i] = '\0';
 
-    //  Pass number of 8us counts to PWM routine.
+    //  Pass number of 8us (or 32us) counts to PWM routine.
     UAPP_Timer0_Init( UAPP_RawADC.byte0 );
 }
 
@@ -740,7 +859,7 @@ void UAPP_ParseRcMsg( void )
 {
 unsigned char i;
 
-    if( UAPP_Flags.UAPP_MsgEchoActive )             // Echo msg if flag active.
+    if( UAPP_Flags.UAPP_EchoActive )                // Echo msg if flag active.
         {
         for( i=0; i<UAPP_IndexRc; i++ )
             if( UAPP_BufferRc[i] != 0x0a && UAPP_BufferRc[i] != 0x0d )
@@ -752,31 +871,46 @@ unsigned char i;
 
     if( UAPP_BufferRc[0] == '[' )
     {
-        switch( UAPP_BufferRc[1] ) {
+        switch( UAPP_BufferRc[1] )
+        {
         case 'H':
             SSIO_PutStringTxBuffer( (char*) UAPP_MsgHelp ); // Help message.
             break;  // case 'H'
+
          case 'V':
             SSIO_PutStringTxBuffer( (char*) UAPP_MsgInit ); // Version message.
             break;  // case 'V'
+
         case 'E':
-            UAPP_Flags.UAPP_MsgEchoActive ^= 1;             // Toggle whether to echo msgs.
-            if( UAPP_Flags.UAPP_MsgEchoActive )             // Echo msg if flag active.
+            UAPP_Flags.UAPP_EchoActive ^= 1;                // Toggle whether to echo msgs.
+            if( UAPP_Flags.UAPP_EchoActive )                // Echo msg if flag active.
                 SSIO_PutStringTxBuffer( (char*) UAPP_MsgEchoActive );   // Now echoing.
             else
                 SSIO_PutStringTxBuffer( (char*) UAPP_MsgEchoInactive ); // Quit echoing.
             break;  // case 'E'
-        case 'R':
-            UAPP_Flags.UAPP_ReportActive ^= 1;             // Toggle whether to report data.
-            if( UAPP_Flags.UAPP_ReportActive )            // Echo msg if flag active.
-                SSIO_PutStringTxBuffer( (char*) UAPP_ReportActive );   // Now reporting.
+
+        case 'P':
+            UAPP_Flags.UAPP_100PctActive ^= 1;  // Toggle whether to use 100% PWM.
+            UAPP_CheckDiscrete_100PctActive();  // Check for override to 5ms period, 0-5ms width.
+            if( UAPP_Flags.UAPP_100PctActive )  // Respond with confirmation message.
+                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctActive );   // Now 100% PWM.
             else
-                SSIO_PutStringTxBuffer( (char*) UAPP_ReportInactive ); // Quit reporting.
+                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctInactive ); // Quit 100% PWM.
+            break;  // case 'P'
+
+        case 'R':
+            UAPP_Flags.UAPP_ReportActive ^= 1;          // Toggle whether to report data.
+            if( UAPP_Flags.UAPP_ReportActive )          // Respond with confirmation message.
+                SSIO_PutStringTxBuffer( (char*) UAPP_MsgReportActive );     // Now reporting.
+            else
+                SSIO_PutStringTxBuffer( (char*) UAPP_MsgReportInactive );   // Quit reporting.
             break;  // case 'R'
+
         case 'B':
             SSIO_PutStringTxBuffer( (char*) UAPP_MsgNotImplemented );   // Msg not implmented.
             //SUTL_InvokeBootloader(); // Not implemented yet.
             break;  // case 'B'
+
         default:
             SSIO_PutStringTxBuffer( (char*) UAPP_MsgNotRecognized );    // Msg not recognized.
             break;
@@ -785,3 +919,24 @@ unsigned char i;
 
     UAPP_ClearRcBuffer();
 }
+
+//*******************************************************************************
+//
+//  Set UAPP_Flags.UAPP_100PctActive if discrete input pulled low.
+//
+//  NOTE: This overrides UAPP_Flags.UAPP_100PctActive that may have been set
+//          in initialization, or from serial messages.  Also, if the discrete
+//          input is left floating high, then no effect here, so init or msgs
+//          control UAPP_Flags.UAPP_100PctActive.
+//
+void UAPP_CheckDiscrete_100PctActive( void )
+{
+#if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
+    if( !PORTAbits.RA4 )                    // If discrete input pulled low..
+        UAPP_Flags.UAPP_100PctActive = 1;   // ..then 5ms period, 0-5ms width.
+#elif UCFG_BOARD==UCFG_KA027C
+    if( !PORTAbits.RA0 )                    // If discrete input not pulled low..
+        UAPP_Flags.UAPP_100PctActive = 1;   // ..else 5ms period, 0-5ms width.
+#endif
+}
+
