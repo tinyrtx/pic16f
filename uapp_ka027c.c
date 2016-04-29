@@ -31,6 +31,11 @@
 //              Also set Timer0 for 32us/count, so can get max PWM width
 //              of 8ms.  This lets us create a 5ms PWM at 5ms period for 100% on.
 //              Add new messages and use Task3 to call UAPP_CheckDiscrete_100PctActive().
+//  25Apr16 Stephen_Higgins@KairosAutonomi.com
+//              Change fastest LED from toggle in Task1, to on during PWM high level.
+//              Remove serial msg override of 100 percent PWM, now completely controlled
+//              by Discrete In RA4(P2DP) or RA0(KA-027C).
+//              Update version number from 0.3.0 to 2.2.0 to match KA-027C version number.
 //
 //*******************************************************************************
 //
@@ -120,7 +125,7 @@ void UAPP_CheckDiscrete_100PctActive( void );
 
 //  String literals.
 
-const char UAPP_MsgInit[] = "[V: KA-027C 16F1847 v2.1.0 20160412]\n\r";
+const char UAPP_MsgInit[] = "[V: KA-027C 16F1847 v2.2.0 20160425]\n\r";
 const char UAPP_MsgHelp[] = "[H: H-elp V-ersion E-cho R-eport P-ercent PWM]\n\r";
 const char UAPP_MsgEchoActive[] = "[E: Message echo activated]\n\r";
 const char UAPP_MsgEchoInactive[] = "[E: Message echo deactivated]\n\r";
@@ -549,8 +554,7 @@ void UAPP_POR_Init_PhaseB( void )
     UAPP_Flags.UAPP_EchoActive = 0;     // Do not echo received msgs.
     UAPP_Flags.UAPP_ReportActive = 1;   // Do report data.
 
-    UAPP_Flags.UAPP_100PctActive = 0;   // Default to 20ms period, 900-2040us width.
-    UAPP_CheckDiscrete_100PctActive();  // Check for override to 5ms period, 0-5ms width.
+    UAPP_CheckDiscrete_100PctActive();  // Check for 100% PWM.
 
     //  Now before we can place chars in the TX buffer, which will cause the USART
     //      HW to start transmitting, we need to ensure that the 4X PLL is running,
@@ -595,6 +599,12 @@ unsigned char Timer0_PreLoad;
 
         LATAbits.LATA1 = 1;             // PWM signal high begins the pulse.
 
+        #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
+            LATBbits.LATB0 = 1;         //  Turn on LED 1.
+        #elif UCFG_BOARD==UCFG_KA027C
+            LATAbits.LATA3 = 1;         //  Turn on LED 2.
+        #endif
+
         INTCONbits.TMR0IF = 0;          // Clear Timer0 interrupt flag.
         INTCONbits.TMR0IE = 1;          // Enable Timer0 interrupts.
         }
@@ -608,6 +618,12 @@ unsigned char Timer0_PreLoad;
 void UAPP_Timer0_Expired( void )
 {
     LATAbits.LATA1 = 0;     // PWM signal low completes the pulse.
+
+    #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
+        LATBbits.LATB0 = 0;             //  Turn off LED 1.
+    #elif UCFG_BOARD==UCFG_KA027C
+        LATAbits.LATA3 = 0;             //  Turn off LED 2.
+    #endif
 }
 
 //*******************************************************************************
@@ -631,12 +647,6 @@ void UAPP_Timer1_Init( void )
 
 void UAPP_Task1( void )
 {
-    #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
-        LATBbits.LATB0 ^= 1;            //  Toggle LED 1.
-    #elif UCFG_BOARD==UCFG_KA027C
-        LATAbits.LATA3 ^= 1;            //  Toggle LED 2.
-    #endif
-
     // If 100% mode active then start ADC and PWM pulse every 5ms. */
     if( UAPP_Flags.UAPP_100PctActive )
         UADC_Trigger();                 //  Trigger an A/D conversion.
@@ -890,12 +900,10 @@ unsigned char i;
             break;  // case 'E'
 
         case 'P':
-            UAPP_Flags.UAPP_100PctActive ^= 1;  // Toggle whether to use 100% PWM.
-            UAPP_CheckDiscrete_100PctActive();  // Check for override to 5ms period, 0-5ms width.
-            if( UAPP_Flags.UAPP_100PctActive )  // Respond with confirmation message.
-                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctActive );   // Now 100% PWM.
+            if( UAPP_Flags.UAPP_100PctActive )              // Respond with status message.
+                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctActive );   // 100% PWM active.
             else
-                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctInactive ); // Quit 100% PWM.
+                SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctInactive ); // 100% PWM INactive.
             break;  // case 'P'
 
         case 'R':
@@ -923,20 +931,27 @@ unsigned char i;
 //*******************************************************************************
 //
 //  Set UAPP_Flags.UAPP_100PctActive if discrete input pulled low.
-//
-//  NOTE: This overrides UAPP_Flags.UAPP_100PctActive that may have been set
-//          in initialization, or from serial messages.  Also, if the discrete
-//          input is left floating high, then no effect here, so init or msgs
-//          control UAPP_Flags.UAPP_100PctActive.
+//  Reset UAPP_Flags.UAPP_100PctActive if discrete input floating high.
 //
 void UAPP_CheckDiscrete_100PctActive( void )
 {
 #if UCFG_BOARD==UCFG_PD2P_2002 || UCFG_BOARD==UCFG_PD2P_2010
-    if( !PORTAbits.RA4 )                    // If discrete input pulled low..
-        UAPP_Flags.UAPP_100PctActive = 1;   // ..then 5ms period, 0-5ms width.
+    if( !PORTAbits.RA4 )                        // If discrete input pulled low..
 #elif UCFG_BOARD==UCFG_KA027C
-    if( !PORTAbits.RA0 )                    // If discrete input not pulled low..
-        UAPP_Flags.UAPP_100PctActive = 1;   // ..else 5ms period, 0-5ms width.
+    if( !PORTAbits.RA0 )                        // If discrete input pulled low..
 #endif
+        if( !UAPP_Flags.UAPP_100PctActive )     // If 100 Pct NOT currently active..
+            {
+            UAPP_Flags.UAPP_100PctActive = 1;   // ..then 5ms period, 0-5ms width.
+            SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctActive );   // 100% PWM active.
+            }
+        else ;
+    else                                        // ..else discrete input not pulled low.
+        if( UAPP_Flags.UAPP_100PctActive )      // If 100 Pct IS currently active..
+            {
+            UAPP_Flags.UAPP_100PctActive = 0;   // ..then 20ms PWM period, 900us-2040us width.
+            SSIO_PutStringTxBuffer( (char*) UAPP_Msg100PctInactive ); // 100% PWM INactive.
+            }
+        else ;
 }
 
